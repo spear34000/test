@@ -1,8 +1,8 @@
 /**
  * @file bot.js
  * @description KakaoTalk MessengerBot R API2 종합 기능 스크립트.
- * 주요 기능: 채팅 순위, 닉네임 변경 감지, 공질 저장/조회/삭제, 자동응답, 운세, 퀴즈, 랜덤 추첨, 도박 게임.
- * @version 1.9.0
+ * 주요 기능: 채팅 순위, 닉네임 변경 감지, 공질 저장/조회/삭제, 자동응답, 운세, 퀴즈, 도박 게임.
+ * @version 1.10.0
  */
 
 const bot = BotManager.getCurrentBot();
@@ -678,24 +678,6 @@ function renderQuizRank() {
   return formatBlock("퀴즈 랭킹 TOP " + top.length, lines);
 }
 
-function pickRandom(args) {
-  if (!args || args.length === 0) {
-    return formatBlock("추첨", ["대상이 없습니다."]);
-  }
-  let pool = [];
-  for (let i = 0; i < args.length; i++) {
-    pool.push(args[i]);
-  }
-  shuffleArray(pool);
-  let winner = pool[0];
-  let lines = [];
-  lines.push("당첨: " + winner);
-  if (pool.length > 1) {
-    lines.push("순서: " + pool.slice(1).join(", "));
-  }
-  return formatBlock("추첨", lines);
-}
-
 function ensureGamble(msg) {
   let id = getUserId(msg);
   let name = msg.author && msg.author.name ? msg.author.name : "";
@@ -747,6 +729,23 @@ function gambleAllIn(msg) {
   return gamblePlay(msg, info.balance);
 }
 
+function gambleBalance(msg) {
+  ensureGamble(msg);
+  let id = getUserId(msg);
+  let info = gambleData[id];
+  return formatBlock("도박", ["도박 잔고는 " + info.balance + "원입니다."]);
+}
+
+function gambleWithdraw(msg) {
+  let id = getUserId(msg);
+  if (gambleData[id]) {
+    delete gambleData[id];
+    writeJson(PATH_GAMBLE, gambleData);
+    return formatBlock("도박", ["탈퇴 처리했습니다. 필요 시 !도박가입 으로 다시 시작하세요."]);
+  }
+  return formatBlock("도박", ["탈퇴할 계정이 없습니다."]);
+}
+
 /* ===== 메시지 이벤트 ===== */
 function onMessage(msg) {
   try {
@@ -785,6 +784,9 @@ function onMessage(msg) {
         delete quizState[msg.room];
         return;
       }
+      quizState[msg.room].expires = Date.now() + QUIZ_TIMEOUT_MS;
+      msg.reply(formatBlock("퀴즈", ["❌ 오답입니다. 다시 입력해주세요.", "제한 시간 10초가 초기화되었습니다."]));
+      return;
     }
   } catch (error) {
     Log.e("onMessage error: " + error);
@@ -817,15 +819,16 @@ function onCommand(cmd) {
       sections.push(formatBlock("운세", [
         "!운세 YYYYMMDD|남/여"
       ]));
-      sections.push(formatBlock("퀴즈·추첨", [
+      sections.push(formatBlock("퀴즈", [
         "!퀴즈, !퀴즈랭킹",
         "!퀴즈초기화 (관리자)",
-        "!추첨 A B C ..."
       ]));
       sections.push(formatBlock("게임", [
         "!도박가입 (초기 1000원)",
         "!도박 금액",
-        "!도박 올인"
+        "!도박 올인",
+        "!도박 잔고",
+        "!도박 탈퇴"
       ]));
       cmd.reply(sections.join("\n"));
       return;
@@ -1023,24 +1026,25 @@ function onCommand(cmd) {
       return;
     }
 
-    if (cmd.command === "추첨") {
-      if (args.length === 0) {
-        cmd.reply("사용법: !추첨 A B C ...");
-        return;
-      }
-      cmd.reply(pickRandom(args));
-      return;
-    }
-
     if (cmd.command === "도박가입") {
       ensureGamble(cmd);
       cmd.reply(formatBlock("도박", ["가입 완료", "초기 잔고 1000원 지급"]));
       return;
     }
 
+    if (cmd.command === "도박탈퇴" || cmd.command === "도박" && args.length > 0 && args[0] === "탈퇴") {
+      cmd.reply(gambleWithdraw(cmd));
+      return;
+    }
+
+    if (cmd.command === "도박잔고" || cmd.command === "도박" && args.length > 0 && args[0] === "잔고") {
+      cmd.reply(gambleBalance(cmd));
+      return;
+    }
+
     if (cmd.command === "도박") {
       if (args.length < 1) {
-        cmd.reply("사용법: !도박 금액 | !도박 올인");
+        cmd.reply("사용법: !도박 금액 | !도박 올인 | !도박 잔고 | !도박 탈퇴");
         return;
       }
       if (args[0] === "올인") {
